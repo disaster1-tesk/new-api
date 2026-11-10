@@ -209,7 +209,15 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/channel/:id/key": accessTokenScopeRule(service.AccessTokenScopeOf(authz.ChannelSecretView)),
 
 	// router/authz-router.go
-	"GET /api/authz/catalog": accessTokenScopeRule("user:read"),
+	"GET /api/authz/catalog":            accessTokenScopeRule("user:read"),
+	"GET /api/authz/roles":              accessTokenScopeRule("authz:read"),
+	"POST /api/authz/roles":             accessTokenScopeRule("authz:write"),
+	"PUT /api/authz/roles/:key":         accessTokenScopeRule("authz:write"),
+	"DELETE /api/authz/roles/:key":      accessTokenScopeRule("authz:write"),
+	"GET /api/authz/roles/:key/members": accessTokenScopeRule("authz:read"),
+	"PUT /api/authz/roles/:key/members": accessTokenScopeRule("authz:write"),
+	"GET /api/authz/users/:id/roles":    accessTokenScopeRule("authz:read"),
+	"PUT /api/authz/users/:id/roles":    accessTokenScopeRule("authz:write"),
 
 	// router/api-router.go: /api/token
 	"GET /api/token/":            accessTokenScopeRule("api_key:read"),

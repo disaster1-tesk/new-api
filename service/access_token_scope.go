@@ -112,6 +112,10 @@ var accessTokenStaticResources = []AccessTokenResource{
 		accessTokenView("View performance, system tasks, and system information."),
 		accessTokenEdit("Run and manage maintenance tasks and performance settings."),
 	}},
+	{Resource: "authz", LabelKey: "Roles and permissions", group: AccessTokenGroupSystem, minRole: common.RoleRootUser, Actions: []authz.ActionDefinition{
+		accessTokenView("View custom roles, their permissions, and members."),
+		accessTokenEdit("Create, edit, and delete custom roles and assign them to administrators."),
+	}},
 }
 
 func hasStaticAccessTokenResource(name string) bool {
