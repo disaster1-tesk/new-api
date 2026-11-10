@@ -950,6 +950,7 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	clearDeletedUserAuthorization(id)
 	recordManageAuditFor(c, originUser.Id, "user.delete", map[string]any{
 		"username":              originUser.Username,
 		"id":                    originUser.Id,
@@ -988,6 +989,7 @@ func DeleteSelf(c *gin.Context) {
 		return
 	}
 	succeeded = true
+	clearDeletedUserAuthorization(identity.UserID)
 	service.ClearRefreshCookie(c)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1138,6 +1140,7 @@ func ManageUser(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		clearDeletedUserAuthorization(user.Id)
 		// 删除用户后，强制清理 Redis 中所有该用户令牌的缓存，
 		// 避免已缓存的令牌在 TTL 过期前仍能通过 TokenAuth 校验。
 		if err := model.InvalidateUserTokensCache(user.Id); err != nil {

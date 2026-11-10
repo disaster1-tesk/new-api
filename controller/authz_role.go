@@ -232,3 +232,12 @@ func SetAuthzUserRoles(c *gin.Context) {
 	})
 	common.ApiSuccess(c, nil)
 }
+
+// clearDeletedUserAuthorization drops a deleted user's role bindings and
+// permission overrides, so a reused user ID cannot inherit them. The deletion
+// has already committed, so a failure is only logged.
+func clearDeletedUserAuthorization(userID int) {
+	if err := authz.ClearUserAuthorization(userID); err != nil {
+		common.SysError(common.LogText("failed to clear authorization of deleted user %d: %s", userID, err.Error()))
+	}
+}

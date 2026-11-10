@@ -377,6 +377,38 @@ func TestAuthzRoleWriteContextValidation(t *testing.T) {
 	}
 }
 
+func TestDeletingUserClearsAuthorization(t *testing.T) {
+	for _, test := range []struct {
+		name, method, path, body string
+	}{
+		{"hard delete", http.MethodDelete, "/user/5", ""},
+		{"manage delete", http.MethodPost, "/user/manage", `{"id":5,"action":"delete"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := setupAuthzRoleTest(t)
+			require.NoError(t, f.db.AutoMigrate(&model.ExternalIdentityClaim{}, &model.UserOAuthBinding{}, &model.TwoFABackupCode{}, &model.Token{}))
+			created := f.call(http.MethodPost, "/roles", `{"key":"viewer","name":"Viewer","grants":{"channel":{"read":true}}}`, roleWrite(service.AuthzRoleWriteCreate, "viewer"))
+			require.True(t, created.Success, created.Message)
+			require.NoError(t, authz.SetUserRoles(5, []string{"viewer"}))
+			require.NoError(t, authz.SetUserPermissions(5, authz.PermissionsMap{authz.ResourceUser: {authz.ActionRead: true}}))
+
+			resp := f.call(test.method, test.path, test.body, verificationOperation(service.VerificationScopeAdminUserDelete, service.AdminUserContext{UserID: 5}))
+			require.True(t, resp.Success, resp.Message)
+
+			var bindings, overrides int64
+			require.NoError(t, f.db.Model(&model.AuthzUserRole{}).Where("user_id = ?", 5).Count(&bindings).Error)
+			require.NoError(t, f.db.Model(&model.CasbinRule{}).Where("v0 = ?", authz.UserSubject(5)).Count(&overrides).Error)
+			assert.Zero(t, bindings)
+			assert.Zero(t, overrides)
+			assert.Empty(t, authz.UserRoleKeys(5))
+			assert.Empty(t, authz.ExplicitUserOverrides(5))
+			members, err := authz.RoleMembers("viewer")
+			require.NoError(t, err)
+			assert.Empty(t, members)
+		})
+	}
+}
+
 func TestAuthzRoleAuditOmitsProof(t *testing.T) {
 	f := setupAuthzRoleTest(t)
 	proof := f.proof(*roleWrite(service.AuthzRoleWriteCreate, "viewer"))
