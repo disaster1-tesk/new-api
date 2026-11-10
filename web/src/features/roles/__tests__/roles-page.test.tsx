@@ -70,6 +70,19 @@ const admins = [
 
 function mockGet() {
   return vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
+    if (url === '/api/verify/methods') {
+      return {
+        data: {
+          success: true,
+          data: {
+            scope: 'authz.role.write',
+            methods: [{ method: '2fa', available: true }],
+            oauth_providers: [],
+            password_encryption_enabled: false,
+          },
+        },
+      }
+    }
     if (url === '/api/authz/roles') {
       return { data: { success: true, data: roles } }
     }
@@ -118,6 +131,51 @@ function mockGet() {
     }
     throw new Error(`unexpected GET ${url}`)
   })
+}
+
+const proofConfig = expect.objectContaining({
+  headers: { 'X-Security-Proof': 'role-proof' },
+  singleUseAuthorization: true,
+})
+
+// mockPost answers the step-up verification with a proof and every other
+// POST with response.
+function mockPost(response: unknown = { data: { success: true } }) {
+  return vi.spyOn(api, 'post').mockImplementation(async (url: string) => {
+    if (url === '/api/verify') {
+      return {
+        data: {
+          success: true,
+          data: {
+            proof_token: 'role-proof',
+            method: '2fa',
+            scope: 'authz.role.write',
+            expires_at: Math.floor(Date.now() / 1000) + 60,
+          },
+        },
+      }
+    }
+    return response
+  })
+}
+
+async function completeVerification() {
+  await userEvent.type(
+    await screen.findByLabelText('Authenticator code or backup code'),
+    '123456'
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
+}
+
+function expectVerified(
+  post: ReturnType<typeof mockPost>,
+  context: Record<string, unknown>
+) {
+  expect(post).toHaveBeenCalledWith(
+    '/api/verify',
+    expect.objectContaining({ scope: 'authz.role.write', context }),
+    expect.anything()
+  )
 }
 
 function renderRoles() {
@@ -187,8 +245,9 @@ it('the root role shows every permission granted and read-only', async () => {
   }
 })
 
-it('saving a custom role sends the toggled grant', async () => {
+it('saving a custom role sends the toggled grant with a proof for that role', async () => {
   mockGet()
+  const post = mockPost()
   const put = vi.spyOn(api, 'put').mockResolvedValue({
     data: { success: true, data: roles[2] },
   })
@@ -201,17 +260,49 @@ it('saving a custom role sends the toggled grant', async () => {
   await userEvent.click(
     screen.getByRole('button', { name: 'Save permissions' })
   )
+  await screen.findByLabelText('Authenticator code or backup code')
+  expect(put).not.toHaveBeenCalled()
+  await completeVerification()
   await waitFor(() =>
-    expect(put).toHaveBeenCalledWith('/api/authz/roles/ops', {
-      name: 'Operations',
-      description: 'Channel operators',
-      grants: { channel: { read: true, write: true } },
-    })
+    expect(put).toHaveBeenCalledWith(
+      '/api/authz/roles/ops',
+      {
+        name: 'Operations',
+        description: 'Channel operators',
+        grants: { channel: { read: true, write: true } },
+      },
+      proofConfig
+    )
   )
+  expectVerified(post, { action: 'update', role_key: 'ops' })
+})
+
+it('cancelling verification leaves the permission draft unsent', async () => {
+  mockGet()
+  mockPost()
+  const put = vi.spyOn(api, 'put')
+  renderRoles()
+  await selectRole(/^Operations/)
+  await waitFor(() => expect(permissionToggles()).toHaveLength(2))
+  await userEvent.click(permissionToggles()[1])
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Save permissions' })
+  )
+  await screen.findByLabelText('Authenticator code or backup code')
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  await waitFor(() =>
+    expect(
+      screen.queryByLabelText('Authenticator code or backup code')
+    ).not.toBeInTheDocument()
+  )
+  expect(put).not.toHaveBeenCalled()
+  expect(permissionToggles()[1]).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Save permissions' })).toBeEnabled()
 })
 
 it('adding a searched administrator saves the full member list', async () => {
   const get = mockGet()
+  const post = mockPost()
   const put = vi
     .spyOn(api, 'put')
     .mockResolvedValue({ data: { success: true } })
@@ -237,15 +328,20 @@ it('adding a searched administrator saves the full member list', async () => {
     await screen.findByRole('button', { name: 'Add Carol' })
   )
   await userEvent.click(screen.getByRole('button', { name: 'Save members' }))
+  await completeVerification()
   await waitFor(() =>
-    expect(put).toHaveBeenCalledWith('/api/authz/roles/ops/members', {
-      user_ids: [5, 6, 7],
-    })
+    expect(put).toHaveBeenCalledWith(
+      '/api/authz/roles/ops/members',
+      { user_ids: [5, 6, 7] },
+      proofConfig
+    )
   )
+  expectVerified(post, { action: 'members', role_key: 'ops' })
 })
 
 it('removing a member saves the remaining member list', async () => {
   mockGet()
+  mockPost()
   const put = vi
     .spyOn(api, 'put')
     .mockResolvedValue({ data: { success: true } })
@@ -256,15 +352,19 @@ it('removing a member saves the remaining member list', async () => {
     await screen.findByRole('button', { name: 'Remove Alice' })
   )
   await userEvent.click(screen.getByRole('button', { name: 'Save members' }))
+  await completeVerification()
   await waitFor(() =>
-    expect(put).toHaveBeenCalledWith('/api/authz/roles/ops/members', {
-      user_ids: [6],
-    })
+    expect(put).toHaveBeenCalledWith(
+      '/api/authz/roles/ops/members',
+      { user_ids: [6] },
+      proofConfig
+    )
   )
 })
 
 it('deleting a role with members states the member count and forces the delete', async () => {
   mockGet()
+  const post = mockPost()
   const remove = vi
     .spyOn(api, 'delete')
     .mockResolvedValue({ data: { success: true } })
@@ -274,9 +374,17 @@ it('deleting a role with members states the member count and forces the delete',
   const dialog = await screen.findByRole('alertdialog')
   expect(dialog).toHaveTextContent('This role has 2 members.')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  await screen.findByLabelText('Authenticator code or backup code')
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  expect(remove).not.toHaveBeenCalled()
+  await completeVerification()
   await waitFor(() =>
-    expect(remove).toHaveBeenCalledWith('/api/authz/roles/ops?force=true')
+    expect(remove).toHaveBeenCalledWith(
+      '/api/authz/roles/ops?force=true',
+      proofConfig
+    )
   )
+  expectVerified(post, { action: 'delete', role_key: 'ops' })
 })
 
 it('a failed save shows the server message key translated', async () => {
@@ -284,6 +392,7 @@ it('a failed save shows the server message key translated', async () => {
   i18next.addResource('en', 'translation', key, 'Translated built-in error')
   try {
     mockGet()
+    mockPost()
     vi.spyOn(api, 'put').mockResolvedValue({
       data: { success: false, message: key, message_key: key },
     })
@@ -294,6 +403,7 @@ it('a failed save shows the server message key translated', async () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Save permissions' })
     )
+    await completeVerification()
     expect(
       await screen.findByText('Translated built-in error')
     ).toBeInTheDocument()
@@ -304,7 +414,7 @@ it('a failed save shows the server message key translated', async () => {
 
 it('creating a role validates the optional key before posting', async () => {
   mockGet()
-  const post = vi.spyOn(api, 'post').mockResolvedValue({
+  const post = mockPost({
     data: {
       success: true,
       data: { ...roles[2], key: 'billing', name: 'Billing', member_count: 0 },
@@ -329,12 +439,62 @@ it('creating a role validates the optional key before posting', async () => {
   await userEvent.clear(key)
   await userEvent.type(key, 'billing')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await completeVerification()
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith('/api/authz/roles', {
-      key: 'billing',
-      name: 'Billing',
-      description: '',
-      grants: {},
-    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/authz/roles',
+      { key: 'billing', name: 'Billing', description: '', grants: {} },
+      proofConfig
+    )
   )
+  expectVerified(post, { action: 'create', role_key: 'billing' })
+})
+
+it('creating a role rejects a name over 100 characters before verifying', async () => {
+  mockGet()
+  const post = mockPost()
+  renderRoles()
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Create role' })
+  )
+  const dialog = await screen.findByRole('dialog')
+  const name = within(dialog).getByRole('textbox', { name: /^Name/ })
+  // The input caps typing at 100 characters; a pasted value is not capped.
+  name.removeAttribute('maxlength')
+  await userEvent.click(name)
+  await userEvent.paste('x'.repeat(101))
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  expect(
+    await within(dialog).findByText('Role name must be at most 100 characters')
+  ).toBeInTheDocument()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('creating a role without a key binds the proof to no key', async () => {
+  mockGet()
+  const post = mockPost({
+    data: {
+      success: true,
+      data: { ...roles[2], key: 'billing', name: 'Billing', member_count: 0 },
+    },
+  })
+  renderRoles()
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Create role' })
+  )
+  const dialog = await screen.findByRole('dialog')
+  await userEvent.type(
+    within(dialog).getByRole('textbox', { name: /^Name/ }),
+    'Billing'
+  )
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await completeVerification()
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/authz/roles',
+      { name: 'Billing', description: '', grants: {} },
+      proofConfig
+    )
+  )
+  expectVerified(post, { action: 'create' })
 })

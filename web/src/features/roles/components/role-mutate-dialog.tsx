@@ -41,13 +41,18 @@ import { handleServerError } from '@/lib/handle-server-error'
 
 import { createRole, invalidateRoleQueries, updateRole } from '../api'
 import type { RoleView } from '../types'
+import { useRoleVerification } from './role-verification-provider'
 
 // Same rule as the backend role key check; messages are locale keys that
 // FormMessage translates.
 const ROLE_KEY_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/
 
 const roleFormSchema = z.object({
-  name: z.string().trim().min(1, 'Role name is required'),
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Role name is required')
+    .max(100, 'Role name must be at most 100 characters'),
   key: z
     .string()
     .trim()
@@ -71,6 +76,7 @@ type RoleMutateDialogProps = {
 export function RoleMutateDialog(props: RoleMutateDialogProps) {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const { verifyRoleChange, verificationActive } = useRoleVerification()
   const role = props.role
   const form = useForm<RoleFormValues>({
     resolver: zodResolver(roleFormSchema),
@@ -84,23 +90,42 @@ export function RoleMutateDialog(props: RoleMutateDialogProps) {
       description: role?.description ?? '',
     })
   }, [props.open, role, form])
+  // A cancelled verification resolves to null and sends nothing.
   const save = useMutation({
-    mutationFn: (values: RoleFormValues) => {
+    mutationFn: async (values: RoleFormValues) => {
       if (role) {
-        return updateRole(role.key, {
+        const proof = await verifyRoleChange({
+          action: 'update',
+          role_key: role.key,
+        })
+        if (!proof) return null
+        return updateRole(
+          role.key,
+          {
+            name: values.name,
+            description: values.description,
+            grants: role.grants,
+          },
+          proof
+        )
+      }
+      const key = values.key || undefined
+      const proof = await verifyRoleChange(
+        key ? { action: 'create', role_key: key } : { action: 'create' }
+      )
+      if (!proof) return null
+      return createRole(
+        {
+          key,
           name: values.name,
           description: values.description,
-          grants: role.grants,
-        })
-      }
-      return createRole({
-        key: values.key || undefined,
-        name: values.name,
-        description: values.description,
-        grants: {},
-      })
+          grants: {},
+        },
+        proof
+      )
     },
     onSuccess: async (saved) => {
+      if (!saved) return
       await invalidateRoleQueries(client)
       toast.success(role ? t('Role updated') : t('Role created'))
       props.onOpenChange(false)
@@ -110,7 +135,7 @@ export function RoleMutateDialog(props: RoleMutateDialogProps) {
   })
   return (
     <Dialog
-      open={props.open}
+      open={props.open && !verificationActive}
       onOpenChange={(open) => {
         if (!save.isPending) props.onOpenChange(open)
       }}

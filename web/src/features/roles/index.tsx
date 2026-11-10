@@ -32,6 +32,7 @@ import { listRoles, rolesQueryKey } from './api'
 import { RoleDetail } from './components/role-detail'
 import { RoleList } from './components/role-list'
 import { RoleMutateDialog } from './components/role-mutate-dialog'
+import { RoleVerificationProvider } from './components/role-verification-provider'
 
 // Roles is the root-only role management page: the role list on the left and
 // the selected role's permissions and members on the right.
@@ -89,7 +90,7 @@ export function Roles() {
   }
 
   return (
-    <>
+    <RoleVerificationProvider>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
           {t('Roles & Permissions')}
@@ -107,6 +108,6 @@ export function Roles() {
         onOpenChange={setCreateOpen}
         onSaved={(role) => setSelectedKey(role.key)}
       />
-    </>
+    </RoleVerificationProvider>
   )
 }

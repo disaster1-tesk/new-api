@@ -46,9 +46,16 @@ export type SecurityProofScope =
   | 'admin.user.passkey.reset'
   | 'admin.user.2fa.disable'
   | 'admin.user.binding.clear'
+  | 'authz.role.write'
 
 /** ManageUser actions that change a user's status or role and need step-up. */
 export type AdminUserManageAction = 'disable' | 'enable' | 'promote' | 'demote'
+
+/** One custom role change: a role by key, or one administrator's roles. */
+export type AuthzRoleWriteContext =
+  | { action: 'create'; role_key?: string }
+  | { action: 'update' | 'delete' | 'members'; role_key: string }
+  | { action: 'user_roles'; user_id: number }
 
 export type VerificationOperation =
   | { scope: 'channel.key.read'; context: { channel_id: number } }
@@ -76,6 +83,7 @@ export type VerificationOperation =
         | { user_id: number; binding_type: string }
         | { user_id: number; provider_id: number }
     }
+  | { scope: 'authz.role.write'; context: AuthzRoleWriteContext }
   | {
       scope: 'access_token.generate'
       context: { scopes: string[]; expires_at: number }
@@ -97,6 +105,7 @@ export type VerificationOperation =
         | 'access_token.generate'
         | 'access_token.update'
         | 'access_token.revoke'
+        | 'authz.role.write'
         | `admin.user.${string}`
       >
       context?: Record<string, never>

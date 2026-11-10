@@ -38,6 +38,7 @@ import { deleteRole, invalidateRoleQueries, updateRole } from '../api'
 import type { RoleView } from '../types'
 import { RoleMembers } from './role-members'
 import { RoleMutateDialog } from './role-mutate-dialog'
+import { useRoleVerification } from './role-verification-provider'
 
 type RoleDetailProps = {
   role: RoleView
@@ -50,6 +51,7 @@ type RoleDetailProps = {
 export function RoleDetail(props: RoleDetailProps) {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const { verifyRoleChange, verificationActive } = useRoleVerification()
   const role = props.role
   // Built-in role text is fixed English source text with locale entries;
   // custom role text is administrator input shown as written.
@@ -78,22 +80,39 @@ export function RoleDetail(props: RoleDetailProps) {
     )
   )
 
+  // A cancelled verification resolves to null and sends nothing.
   const savePermissions = useMutation({
-    mutationFn: () =>
-      updateRole(role.key, {
-        name: role.name,
-        description: role.description,
-        grants: draft,
-      }),
-    onSuccess: async () => {
+    mutationFn: async () => {
+      const proof = await verifyRoleChange({
+        action: 'update',
+        role_key: role.key,
+      })
+      if (!proof) return null
+      return updateRole(
+        role.key,
+        { name: role.name, description: role.description, grants: draft },
+        proof
+      )
+    },
+    onSuccess: async (saved) => {
+      if (!saved) return
       await invalidateRoleQueries(client)
       toast.success(t('Permissions saved'))
     },
     onError: (error) => handleServerError(error),
   })
   const remove = useMutation({
-    mutationFn: () => deleteRole(role.key, role.member_count > 0),
-    onSuccess: async () => {
+    mutationFn: async () => {
+      const proof = await verifyRoleChange({
+        action: 'delete',
+        role_key: role.key,
+      })
+      if (!proof) return false
+      await deleteRole(role.key, role.member_count > 0, proof)
+      return true
+    },
+    onSuccess: async (deleted) => {
+      if (!deleted) return
       await invalidateRoleQueries(client)
       toast.success(t('Role deleted'))
       setDeleteOpen(false)
@@ -213,7 +232,7 @@ export function RoleDetail(props: RoleDetailProps) {
             role={role}
           />
           <ConfirmDialog
-            open={deleteOpen}
+            open={deleteOpen && !verificationActive}
             onOpenChange={setDeleteOpen}
             title={t('Delete role {{name}}?', { name: role.name })}
             desc={

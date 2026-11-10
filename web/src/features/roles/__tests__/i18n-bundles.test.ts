@@ -47,12 +47,13 @@ const requiredKeys = [
   'Role key must start with a lowercase letter and contain only lowercase letters, digits, hyphens, or underscores',
   'Role key already exists',
   'Role name is required',
+  'Role name must be at most 100 characters',
+  'Role description is too long',
   'Role still has members; remove them first or delete with force',
   'Only administrators can be assigned roles',
   'Invalid user ID',
   'Roles and permissions',
   'View custom roles, their permissions, and members.',
-  'Create, edit, and delete custom roles and assign them to administrators.',
   'Roles & Permissions',
 ]
 

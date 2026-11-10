@@ -56,12 +56,14 @@ import {
   setRoleMembers,
 } from '../api'
 import type { RoleMember, RoleView } from '../types'
+import { useRoleVerification } from './role-verification-provider'
 
 // RoleMembers edits the administrators bound to a custom role. Changes stay
 // local until saved, then replace the whole member list.
 export function RoleMembers(props: { role: RoleView }) {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const { verifyRoleChange } = useRoleVerification()
   const roleKey = props.role.key
   const [draft, setDraft] = useState<RoleMember[] | null>(null)
   const [search, setSearch] = useState('')
@@ -83,13 +85,23 @@ export function RoleMembers(props: { role: RoleView }) {
   })
   const members = draft ?? membersQuery.data ?? []
   const memberIds = new Set(members.map((member) => member.id))
+  // A cancelled verification resolves to false and sends nothing.
   const save = useMutation({
-    mutationFn: () =>
-      setRoleMembers(
+    mutationFn: async () => {
+      const proof = await verifyRoleChange({
+        action: 'members',
+        role_key: roleKey,
+      })
+      if (!proof) return false
+      await setRoleMembers(
         roleKey,
-        members.map((member) => member.id)
-      ),
-    onSuccess: async () => {
+        members.map((member) => member.id),
+        proof
+      )
+      return true
+    },
+    onSuccess: async (saved) => {
+      if (!saved) return
       await invalidateRoleQueries(client)
       setDraft(null)
       toast.success(t('Members saved'))
