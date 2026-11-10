@@ -248,7 +248,36 @@ func TestResolverFallsBackWhenStoreUnavailable(t *testing.T) {
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelRead))
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelSensitiveWrite))
 
-	require.NoError(t, db.Migrator().DropTable(&model.AuthzUserRole{}))
+	customRoleMu.Lock()
+	store := customRoleDB
+	customRoleDB = nil
+	customRoleMu.Unlock()
+	invalidateRoleBindings()
+	t.Cleanup(func() {
+		customRoleMu.Lock()
+		customRoleDB = store
+		customRoleMu.Unlock()
+		invalidateRoleBindings()
+	})
 	assert.Nil(t, UserRoleKeys(3))
 	assert.True(t, Can(3, common.RoleAdminUser, ChannelRead))
+}
+
+func TestResolverFailsClosedOnBindingQueryError(t *testing.T) {
+	db := newCustomRoleTestDB(t)
+	require.True(t, Can(6, common.RoleAdminUser, ChannelRead))
+
+	require.NoError(t, db.Migrator().DropTable(&model.AuthzUserRole{}))
+	invalidateRoleBindings()
+	assert.False(t, Can(6, common.RoleAdminUser, ChannelRead))
+	assert.False(t, Can(6, common.RoleAdminUser, ChannelRead), "a failed lookup must not be cached as an empty binding")
+	assert.True(t, Can(1, common.RoleRootUser, ChannelRead))
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return SetUserPermissionsInTx(tx, 6, PermissionsMap{ResourceChannel: {ActionRead: true}})
+	})
+	assert.Error(t, err)
+
+	require.NoError(t, db.AutoMigrate(&model.AuthzUserRole{}))
+	invalidateRoleBindings()
+	assert.True(t, Can(6, common.RoleAdminUser, ChannelRead))
 }

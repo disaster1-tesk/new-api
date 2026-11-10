@@ -82,7 +82,12 @@ func init() {
 		case systemRole >= common.RoleRootUser:
 			return []string{BuiltInRoleRoot}
 		case systemRole >= common.RoleAdminUser:
-			if keys := UserRoleKeys(userID); len(keys) > 0 {
+			keys, err := userRoleBindings(userID)
+			if err != nil {
+				// Fail closed: an unknown binding may be a restricted role.
+				return nil
+			}
+			if len(keys) > 0 {
 				return keys
 			}
 			return []string{BuiltInRoleAdmin}
@@ -120,23 +125,31 @@ func invalidateRoleBindings() {
 }
 
 // UserRoleKeys returns the custom role keys bound to the user, or nil when the
-// store is unavailable.
+// store is unavailable or the lookup failed.
 func UserRoleKeys(userID int) []string {
+	keys, _ := userRoleBindings(userID)
+	return keys
+}
+
+// userRoleBindings returns the cached role keys of a user. It returns no error
+// when the store is not initialized; a failed lookup is logged and not cached.
+func userRoleBindings(userID int) ([]string, error) {
 	customRoleMu.RLock()
 	db := customRoleDB
 	gen := roleBindingGen
 	entry, cached := roleBindingCache[userID]
 	customRoleMu.RUnlock()
 	if cached && time.Now().Before(entry.expires) {
-		return slices.Clone(entry.keys)
+		return slices.Clone(entry.keys), nil
 	}
 	if db == nil {
-		return nil
+		return nil, nil
 	}
 
 	keys, err := loadUserRoleKeys(db, userID)
 	if err != nil {
-		return nil
+		common.SysError(common.LogText("failed to load authz role bindings for user %d: %s", userID, err.Error()))
+		return nil, err
 	}
 	ttl := time.Duration(common.SyncFrequency) * time.Second
 	if ttl <= 0 {
@@ -147,7 +160,7 @@ func UserRoleKeys(userID int) []string {
 		roleBindingCache[userID] = roleBindingEntry{keys: keys, expires: time.Now().Add(ttl)}
 	}
 	customRoleMu.Unlock()
-	return slices.Clone(keys)
+	return slices.Clone(keys), nil
 }
 
 // adminRolesInTx resolves an administrator's roles from tx, so a transaction
