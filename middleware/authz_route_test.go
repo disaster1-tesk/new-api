@@ -28,7 +28,10 @@ func initAuthzRouteTest(t *testing.T) *gorm.DB {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}, &model.User{}, &model.AuditLog{}))
+	previousDB, previousLogDB, previousRedis := model.DB, model.LOG_DB, common.RedisEnabled
+	model.DB, model.LOG_DB, common.RedisEnabled = db, db, false
+	t.Cleanup(func() { model.DB, model.LOG_DB, common.RedisEnabled = previousDB, previousLogDB, previousRedis })
 	users := []model.User{
 		{Id: 1, Username: "root", AffCode: "r", Password: "password", Role: common.RoleRootUser},
 		{Id: 5, Username: "admin5", AffCode: "a5", Password: "password", Role: common.RoleAdminUser},
@@ -146,6 +149,43 @@ func TestRootRouteWithAdminDefaultScopeStaysRootOnly(t *testing.T) {
 		assert.True(t, routeAllowed(t, http.MethodGet, "/api/rbac-test/root-user-read", userID, common.RoleAdminUser, common.RoleAdminUser), userID)
 	}
 	assert.True(t, routeAllowed(t, http.MethodGet, "/api/rbac-test/root-user-read", 1, common.RoleRootUser, common.RoleRootUser))
+}
+
+func TestPermissionDenialIsAudited(t *testing.T) {
+	db := initAuthzRouteTest(t)
+	_, err := authz.CreateRole(authz.RoleInput{
+		Key: "option-reader", Name: "Option reader",
+		Grants: authz.PermissionsMap{authz.ResourceOption: {authz.ActionRead: true}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, authz.SetUserRoles(6, []string{"option-reader"}))
+
+	require.True(t, routeAllowed(t, http.MethodGet, "/api/option/", 6, common.RoleAdminUser, common.RoleRootUser))
+	require.False(t, routeAllowed(t, http.MethodGet, "/api/not-declared", 5, common.RoleAdminUser, common.RoleRootUser))
+	var count int64
+	require.NoError(t, db.Model(&model.AuditLog{}).Count(&count).Error)
+	assert.Zero(t, count, "allowed requests and plain role floors write no denial entry")
+
+	require.False(t, routeAllowed(t, http.MethodPut, "/api/option/", 6, common.RoleAdminUser, common.RoleRootUser))
+	var entries []model.AuditLog
+	require.NoError(t, db.Find(&entries).Error)
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	assert.Equal(t, "authz.permission_denied", entry.Action)
+	assert.Equal(t, model.AuditCategoryOperation, entry.Category)
+	assert.Equal(t, 6, entry.UserId)
+	assert.Equal(t, "admin6", entry.Username)
+	assert.Equal(t, common.RoleAdminUser, entry.ActorRole)
+	assert.Equal(t, http.MethodPut, entry.Method)
+	assert.Equal(t, "/api/option/", entry.Route)
+	assert.Equal(t, http.StatusForbidden, entry.Status)
+	assert.False(t, entry.Success)
+	require.NotNil(t, entry.Other.Op)
+	params, err := common.Marshal(entry.Other.Op.Params)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"method":"PUT","route":"/api/option/","scope":"option:write","user_id":6,"role":10}`, string(params))
+	require.NotNil(t, entry.Other.AdminInfo)
+	assert.Equal(t, "session", entry.Other.AdminInfo.AuthMethod)
 }
 
 func TestBuiltInAdminBaselineMatchesStaticMinRole(t *testing.T) {

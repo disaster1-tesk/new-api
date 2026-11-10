@@ -1,7 +1,10 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
@@ -51,5 +54,24 @@ func dashboardRoleAllowed(c *gin.Context, userID, role, minRole int) bool {
 	if minRole >= common.RoleRootUser && authz.RoleBaselineAllows(authz.BuiltInRoleAdmin, permission) {
 		allowed = false
 	}
+	if !allowed {
+		recordAuthzRouteDenial(c, userID, role, rule.Scope())
+	}
 	return allowed
+}
+
+// recordAuthzRouteDenial writes a failed operation audit entry for a route the
+// administrator's roles and overrides do not permit. The request is rejected
+// before the admin write audit starts, so nothing else records it.
+func recordAuthzRouteDenial(c *gin.Context, userID, role int, scope string) {
+	method, route := c.Request.Method, c.FullPath()
+	authMethod := "session"
+	if _, ok := c.Get(accessTokenAuditContextKey); ok {
+		authMethod = "access_token"
+	}
+	params := map[string]any{"method": method, "route": route, "scope": scope, "user_id": userID, "role": role}
+	adminInfo := &model.AuditAdminInfo{AdminID: userID, AdminRole: role, AuthMethod: authMethod}
+	auditInfo := &model.AuditRequestInfo{Method: method, Route: route, Path: route, Status: http.StatusForbidden, Success: false}
+	content := "Permission denied: " + method + " " + route + " requires " + scope
+	model.RecordOperationAuditLog(userID, role, content, c.ClientIP(), "authz.permission_denied", params, adminInfo, auditInfo, c)
 }
