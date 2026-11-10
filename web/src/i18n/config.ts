@@ -20,6 +20,8 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
+import { registerRolesI18n } from '@/features/roles/i18n/register'
+
 import { convertDetectedLanguage } from './languages'
 import en from './locales/en.json'
 import fr from './locales/fr.json'
@@ -60,5 +62,6 @@ i18n
       convertDetectedLanguage,
     },
   })
+registerRolesI18n(i18n)
 
 export default i18n
