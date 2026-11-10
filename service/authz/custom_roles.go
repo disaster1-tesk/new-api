@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -15,13 +16,15 @@ import (
 )
 
 var (
-	ErrRoleNotFound      = errors.New("role not found")
-	ErrRoleBuiltIn       = errors.New("built-in roles cannot be modified")
-	ErrRoleKeyInvalid    = errors.New("invalid role key")
-	ErrRoleKeyExists     = errors.New("role key already exists")
-	ErrRoleNameRequired  = errors.New("role name is required")
-	ErrRoleHasMembers    = errors.New("role still has members")
-	ErrRoleMemberInvalid = errors.New("role members must be administrators below root")
+	ErrRoleNotFound           = errors.New("role not found")
+	ErrRoleBuiltIn            = errors.New("built-in roles cannot be modified")
+	ErrRoleKeyInvalid         = errors.New("invalid role key")
+	ErrRoleKeyExists          = errors.New("role key already exists")
+	ErrRoleNameRequired       = errors.New("role name is required")
+	ErrRoleNameTooLong        = errors.New("role name is too long")
+	ErrRoleDescriptionTooLong = errors.New("role description is too long")
+	ErrRoleHasMembers         = errors.New("role still has members")
+	ErrRoleMemberInvalid      = errors.New("role members must be administrators below root")
 
 	errRoleStoreUnavailable = errors.New("authz role store is not initialized")
 	errBindingsTableMissing = errors.New("authz role bindings table has not been migrated yet")
@@ -30,6 +33,11 @@ var (
 const (
 	customRoleSort   = 100
 	maxRoleKeyLength = 64
+	// maxRoleNameLength matches the authz_roles.name column size in
+	// characters; maxRoleDescriptionBytes is the smallest TEXT column limit
+	// among the supported databases (MySQL).
+	maxRoleNameLength       = 100
+	maxRoleDescriptionBytes = 65535
 )
 
 var (
@@ -270,9 +278,9 @@ func CreateRole(input RoleInput) (RoleView, error) {
 	if err != nil {
 		return RoleView{}, err
 	}
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		return RoleView{}, ErrRoleNameRequired
+	name, description, err := roleText(input)
+	if err != nil {
+		return RoleView{}, err
 	}
 	if input.Key != "" && !isCustomRoleKey(input.Key) {
 		return RoleView{}, ErrRoleKeyInvalid
@@ -281,7 +289,7 @@ func CreateRole(input RoleInput) (RoleView, error) {
 	role := model.AuthzRole{
 		Key:         input.Key,
 		Name:        name,
-		Description: strings.TrimSpace(input.Description),
+		Description: description,
 		BuiltIn:     false,
 		Enabled:     true,
 		Sort:        customRoleSort,
@@ -337,7 +345,6 @@ func UpdateRole(key string, input RoleInput) (RoleView, error) {
 	if err != nil {
 		return RoleView{}, err
 	}
-	name := strings.TrimSpace(input.Name)
 	var role model.AuthzRole
 	err = db.Transaction(func(tx *gorm.DB) error {
 		var err error
@@ -345,11 +352,10 @@ func UpdateRole(key string, input RoleInput) (RoleView, error) {
 		if err != nil {
 			return err
 		}
-		if name == "" {
-			return ErrRoleNameRequired
+		role.Name, role.Description, err = roleText(input)
+		if err != nil {
+			return err
 		}
-		role.Name = name
-		role.Description = strings.TrimSpace(input.Description)
 		if err := tx.Save(&role).Error; err != nil {
 			return err
 		}
@@ -508,6 +514,22 @@ func ClearUserRolesInTx(tx *gorm.DB, userID int) error {
 	}
 	invalidateRoleBindings()
 	return nil
+}
+
+// roleText trims a role's name and description and checks them against
+// their column sizes.
+func roleText(input RoleInput) (name, description string, err error) {
+	name = strings.TrimSpace(input.Name)
+	description = strings.TrimSpace(input.Description)
+	switch {
+	case name == "":
+		return "", "", ErrRoleNameRequired
+	case utf8.RuneCountInString(name) > maxRoleNameLength:
+		return "", "", ErrRoleNameTooLong
+	case len(description) > maxRoleDescriptionBytes:
+		return "", "", ErrRoleDescriptionTooLong
+	}
+	return name, description, nil
 }
 
 func isCustomRoleKey(key string) bool {

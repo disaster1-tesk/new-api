@@ -2,6 +2,7 @@ package authz
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -102,6 +103,25 @@ func TestUserOverrideInTxIsRelativeToBoundRoles(t *testing.T) {
 		ResourceChannel: {ActionRead: false},
 	}, ExplicitUserOverrides(5), "a value equal to the role baseline stores no override")
 	assert.True(t, Can(6, common.RoleAdminUser, ChannelWrite), "other admins keep the admin baseline")
+}
+
+func TestRoleNameAndDescriptionLength(t *testing.T) {
+	newCustomRoleTestDB(t)
+	createChannelViewer(t)
+	maxName := strings.Repeat("名", maxRoleNameLength)
+
+	view, err := CreateRole(RoleInput{Key: "long", Name: "  " + maxName + "  ", Description: strings.Repeat("d", maxRoleDescriptionBytes)})
+	require.NoError(t, err)
+	assert.Equal(t, maxName, view.Name)
+
+	_, err = CreateRole(RoleInput{Key: "too-long", Name: maxName + "x"})
+	assert.ErrorIs(t, err, ErrRoleNameTooLong)
+	_, err = CreateRole(RoleInput{Key: "too-long", Name: "x", Description: strings.Repeat("d", maxRoleDescriptionBytes+1)})
+	assert.ErrorIs(t, err, ErrRoleDescriptionTooLong)
+	_, err = UpdateRole("channel-viewer", RoleInput{Name: maxName + "x"})
+	assert.ErrorIs(t, err, ErrRoleNameTooLong)
+	_, err = UpdateRole("channel-viewer", RoleInput{Name: "x", Description: strings.Repeat("d", maxRoleDescriptionBytes+1)})
+	assert.ErrorIs(t, err, ErrRoleDescriptionTooLong)
 }
 
 func TestRoleMembersMustBeAdmins(t *testing.T) {

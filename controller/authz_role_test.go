@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -113,6 +114,8 @@ func TestAuthzRoleValidation(t *testing.T) {
 	r := setupAuthzRoleTest(t)
 	created := callAuthzRole(t, r, http.MethodPost, "/roles", `{"key":"viewer","name":"Viewer","grants":{}}`)
 	require.True(t, created.Success, created.Message)
+	longName := strings.Repeat("名", 101)
+	longDescription := strings.Repeat("d", 65536)
 
 	cases := []struct {
 		name, method, path, body string
@@ -122,9 +125,12 @@ func TestAuthzRoleValidation(t *testing.T) {
 			"Role key must start with a lowercase letter and contain only lowercase letters, digits, hyphens, or underscores"},
 		{"create duplicate key", http.MethodPost, "/roles", `{"key":"viewer","name":"x","grants":{}}`, "Role key already exists"},
 		{"create empty name", http.MethodPost, "/roles", `{"key":"other","name":"","grants":{}}`, "Role name is required"},
+		{"create long name", http.MethodPost, "/roles", `{"name":"` + longName + `","grants":{}}`, "Role name must be at most 100 characters"},
+		{"create long description", http.MethodPost, "/roles", `{"name":"x","description":"` + longDescription + `","grants":{}}`, "Role description is too long"},
 		{"create empty body", http.MethodPost, "/roles", ``, ""},
 		{"create invalid json", http.MethodPost, "/roles", `{`, ""},
 		{"update unknown role", http.MethodPut, "/roles/nope", `{"name":"x","grants":{}}`, "Role not found"},
+		{"update long name", http.MethodPut, "/roles/viewer", `{"name":"` + longName + `","grants":{}}`, "Role name must be at most 100 characters"},
 		{"update invalid json", http.MethodPut, "/roles/viewer", `{`, ""},
 		{"delete unknown role", http.MethodDelete, "/roles/nope", "", "Role not found"},
 		{"members unknown role", http.MethodGet, "/roles/nope/members", "", "Role not found"},

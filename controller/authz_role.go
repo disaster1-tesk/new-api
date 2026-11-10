@@ -29,6 +29,10 @@ func authzRoleError(c *gin.Context, err error) {
 		common.ApiErrorT(c, "Role key already exists")
 	case errors.Is(err, authz.ErrRoleNameRequired):
 		common.ApiErrorT(c, "Role name is required")
+	case errors.Is(err, authz.ErrRoleNameTooLong):
+		common.ApiErrorT(c, "Role name must be at most 100 characters")
+	case errors.Is(err, authz.ErrRoleDescriptionTooLong):
+		common.ApiErrorT(c, "Role description is too long")
 	case errors.Is(err, authz.ErrRoleHasMembers):
 		common.ApiErrorT(c, "Role still has members; remove them first or delete with force")
 	case errors.Is(err, authz.ErrRoleMemberInvalid):
