@@ -114,7 +114,6 @@ var accessTokenStaticResources = []AccessTokenResource{
 	}},
 	{Resource: "authz", LabelKey: "Roles and permissions", group: AccessTokenGroupSystem, minRole: common.RoleRootUser, Actions: []authz.ActionDefinition{
 		accessTokenView("View custom roles, their permissions, and members."),
-		accessTokenEdit("Create, edit, and delete custom roles and assign them to administrators."),
 	}},
 }
 
@@ -261,6 +260,7 @@ var accessTokenVerificationScopes = map[string]string{
 	VerificationScopeAccessTokenUpdate:     "",
 	VerificationScopeAccessTokenRevoke:     "",
 	VerificationScopeLogin:                 "",
+	VerificationScopeAuthzRoleWrite:        "",
 }
 
 // AccessTokenVerificationScope returns the token scope a PAT needs for a
