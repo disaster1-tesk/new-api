@@ -9,7 +9,8 @@ import (
 // authzRouteRoleOverrides keeps routes on a plain role floor even when the
 // route table declares a permission scope for them.
 var authzRouteRoleOverrides = map[string]int{
-	"GET /api/authz/catalog": common.RoleAdminUser,
+	"GET /api/authz/catalog":    common.RoleAdminUser,
+	"POST /api/channel/:id/key": common.RoleRootUser,
 }
 
 // dashboardRoleAllowed decides whether a dashboard user may use the matched
@@ -32,7 +33,9 @@ func dashboardRoleAllowed(c *gin.Context, userID, role, minRole int) bool {
 	if !authz.Initialized() {
 		return role >= minRole
 	}
-	if rule, ok := AccessTokenRouteRule(key); ok {
+	// Routes declared through DeclareAccessTokenPermissionRoute are guarded by
+	// RequirePermission, which denies after the admin audit has started.
+	if rule, ok := accessTokenRouteRules[key]; ok {
 		if permission, ok := authz.PermissionFromScope(rule.Scope()); ok {
 			return authz.Can(userID, role, permission)
 		}

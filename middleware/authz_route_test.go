@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,6 +39,8 @@ func initAuthzRouteTest(t *testing.T) {
 	require.NoError(t, authz.Init(db))
 }
 
+var permissionRouteOnce sync.Once
+
 func TestDashboardRoleAllowed(t *testing.T) {
 	initAuthzRouteTest(t)
 	_, err := authz.CreateRole(authz.RoleInput{
@@ -52,6 +55,10 @@ func TestDashboardRoleAllowed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, authz.SetUserRoles(6, []string{"option-reader"}))
 	require.NoError(t, authz.SetUserRoles(7, []string{"channel-viewer"}))
+	require.NoError(t, authz.SetUserPermissions(5, authz.PermissionsMap{authz.ResourceChannel: {authz.ActionSecretView: true}}))
+	permissionRouteOnce.Do(func() {
+		DeclareAccessTokenPermissionRoute(http.MethodPost, "/api/rbac-test/permission-route", authz.ChannelSensitiveWrite)
+	})
 
 	tests := []struct {
 		method, path          string
@@ -70,6 +77,7 @@ func TestDashboardRoleAllowed(t *testing.T) {
 		{http.MethodGet, "/api/not-declared", 5, common.RoleAdminUser, common.RoleAdminUser, true},
 		{http.MethodGet, "/api/not-declared", 5, common.RoleAdminUser, common.RoleRootUser, false},
 		{http.MethodPost, "/api/channel/:id/key", 5, common.RoleAdminUser, common.RoleRootUser, false},
+		{http.MethodPost, "/api/rbac-test/permission-route", 6, common.RoleAdminUser, common.RoleAdminUser, true},
 	}
 	gin.SetMode(gin.TestMode)
 	for _, tt := range tests {
