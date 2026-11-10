@@ -157,7 +157,17 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ResourceTaskPlugin: {
 			ActionBind: false,
 		},
-		ResourceAudit: {ActionRead: false},
+		ResourceAudit:      {ActionRead: false},
+		ResourceUser:       {ActionRead: true, ActionWrite: true},
+		ResourceBilling:    {ActionRead: true, ActionWrite: true},
+		ResourceModel:      {ActionRead: true, ActionWrite: true},
+		ResourceDeployment: {ActionRead: true, ActionWrite: true},
+		ResourceGroup:      {ActionRead: true, ActionWrite: true},
+		ResourceRedemption: {ActionRead: true, ActionWrite: true},
+		ResourceLog:        {ActionRead: true},
+		ResourceOption:     {ActionRead: false, ActionWrite: false},
+		ResourcePlugin:     {ActionRead: false, ActionWrite: false},
+		ResourceOps:        {ActionRead: false, ActionWrite: false},
 	}, ExplicitUserPermissions(42))
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
@@ -189,7 +199,17 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ResourceTaskPlugin: {
 			ActionBind: false,
 		},
-		ResourceAudit: {ActionRead: false},
+		ResourceAudit:      {ActionRead: false},
+		ResourceUser:       {ActionRead: true, ActionWrite: true},
+		ResourceBilling:    {ActionRead: true, ActionWrite: true},
+		ResourceModel:      {ActionRead: true, ActionWrite: true},
+		ResourceDeployment: {ActionRead: true, ActionWrite: true},
+		ResourceGroup:      {ActionRead: true, ActionWrite: true},
+		ResourceRedemption: {ActionRead: true, ActionWrite: true},
+		ResourceLog:        {ActionRead: true},
+		ResourceOption:     {ActionRead: false, ActionWrite: false},
+		ResourcePlugin:     {ActionRead: false, ActionWrite: false},
+		ResourceOps:        {ActionRead: false, ActionWrite: false},
 	}, ExplicitUserPermissions(42))
 	assert.Empty(t, ExplicitUserOverrides(42))
 }
