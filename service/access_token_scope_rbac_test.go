@@ -94,3 +94,34 @@ func TestPermissionFromScope(t *testing.T) {
 		assert.False(t, ok, scope)
 	}
 }
+
+func TestAccessTokenCatalogFollowsCustomRoles(t *testing.T) {
+	wasMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = wasMaster })
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}, &model.User{}))
+	require.NoError(t, db.Create(&model.User{Id: 5, Username: "admin5", Password: "password", AffCode: "a5", Role: common.RoleAdminUser}).Error)
+	require.NoError(t, authz.Init(db))
+	role, err := authz.CreateRole(authz.RoleInput{Name: "Option reader", Grants: authz.PermissionsMap{"option": {"read": true}}})
+	require.NoError(t, err)
+	require.NoError(t, authz.SetUserRoles(5, []string{role.Key}))
+
+	var system []AccessTokenResource
+	for _, group := range AccessTokenCatalog(5, common.RoleAdminUser) {
+		for _, resource := range group.Resources {
+			assert.NotEqual(t, "user", resource.Resource, group.Group)
+		}
+		if group.Group == AccessTokenGroupSystem {
+			system = group.Resources
+		}
+	}
+	idx := slices.IndexFunc(system, func(resource AccessTokenResource) bool { return resource.Resource == "option" })
+	require.GreaterOrEqual(t, idx, 0)
+	require.Len(t, system[idx].Actions, 1)
+	assert.Equal(t, "read", system[idx].Actions[0].Action)
+}
