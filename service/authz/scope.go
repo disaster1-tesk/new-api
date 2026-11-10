@@ -20,3 +20,8 @@ func PermissionFromScope(scope string) (Permission, bool) {
 func IsRegisteredResource(resource string) bool {
 	return isKnownResource(resource)
 }
+
+// Initialized reports whether Init has loaded the enforcer.
+func Initialized() bool {
+	return currentEnforcer() != nil
+}
