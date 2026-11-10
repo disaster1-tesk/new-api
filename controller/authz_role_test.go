@@ -258,7 +258,18 @@ func TestAuthzRoleValidation(t *testing.T) {
 		})
 	}
 
-	resp := f.call(http.MethodGet, "/users/5/roles", "", nil)
+	// A role at both column limits is stored on every database.
+	maxName := strings.Repeat("名", 100)
+	maxDescription := strings.Repeat("d", 65535)
+	resp := f.call(http.MethodPost, "/roles", `{"key":"limits","name":"`+maxName+`","description":"`+maxDescription+`","grants":{}}`,
+		roleWrite(service.AuthzRoleWriteCreate, "limits"))
+	require.True(t, resp.Success, resp.Message)
+	var stored model.AuthzRole
+	require.NoError(t, f.db.Where(map[string]any{"key": "limits"}).First(&stored).Error)
+	assert.Equal(t, maxName, stored.Name)
+	assert.Len(t, stored.Description, 65535)
+
+	resp = f.call(http.MethodGet, "/users/5/roles", "", nil)
 	require.True(t, resp.Success)
 	assert.JSONEq(t, `[]`, string(resp.Data))
 
