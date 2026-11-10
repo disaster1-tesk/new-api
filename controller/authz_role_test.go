@@ -140,6 +140,7 @@ func TestAuthzRoleValidation(t *testing.T) {
 		{"set user roles unknown role", http.MethodPut, "/users/5/roles", `{"role_keys":["nope"]}`, "Role not found"},
 		{"set user roles common user", http.MethodPut, "/users/8/roles", `{"role_keys":["viewer"]}`, "Only administrators can be assigned roles"},
 		{"set user roles zero id", http.MethodPut, "/users/0/roles", `{"role_keys":["viewer"]}`, "Only administrators can be assigned roles"},
+		{"set user roles negative id", http.MethodPut, "/users/-1/roles", `{"role_keys":["viewer"]}`, "Only administrators can be assigned roles"},
 		{"set user roles nonexistent id", http.MethodPut, "/users/999/roles", `{"role_keys":["viewer"]}`, "Only administrators can be assigned roles"},
 	}
 	for _, tc := range cases {
