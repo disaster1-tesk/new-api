@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func initAuthzRouteTest(t *testing.T) {
+func initAuthzRouteTest(t *testing.T) *gorm.DB {
 	t.Helper()
 	wasMaster := common.IsMasterNode
 	common.IsMasterNode = true
@@ -37,6 +38,21 @@ func initAuthzRouteTest(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&users).Error)
 	require.NoError(t, authz.Init(db))
+	return db
+}
+
+// routeAllowed runs dashboardRoleAllowed for a request matched to path.
+func routeAllowed(t *testing.T, method, path string, userID, role, minRole int) bool {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Handle(method, path, func(c *gin.Context) {
+		c.JSON(http.StatusOK, dashboardRoleAllowed(c, userID, role, minRole))
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(method, path, nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	return recorder.Body.String() == "true"
 }
 
 var permissionRouteOnce sync.Once
@@ -79,18 +95,57 @@ func TestDashboardRoleAllowed(t *testing.T) {
 		{http.MethodPost, "/api/channel/:id/key", 5, common.RoleAdminUser, common.RoleRootUser, false},
 		{http.MethodPost, "/api/rbac-test/permission-route", 6, common.RoleAdminUser, common.RoleAdminUser, true},
 	}
-	gin.SetMode(gin.TestMode)
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
-			router := gin.New()
-			router.Handle(tt.method, tt.path, func(c *gin.Context) {
-				c.JSON(http.StatusOK, dashboardRoleAllowed(c, tt.userID, tt.role, tt.minRole))
-			})
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(tt.method, tt.path, nil))
-			assert.Equal(t, tt.want, recorder.Body.String() == "true")
+			assert.Equal(t, tt.want, routeAllowed(t, tt.method, tt.path, tt.userID, tt.role, tt.minRole))
 		})
 	}
+}
+
+// fullyGrantedRole binds admin 6 to a role holding every catalog permission.
+func fullyGrantedRole(t *testing.T) {
+	t.Helper()
+	grants := authz.PermissionsMap{}
+	for _, definition := range authz.Catalog() {
+		grants[definition.Resource] = map[string]bool{}
+		for _, action := range definition.Actions {
+			grants[definition.Resource][action.Action] = true
+		}
+	}
+	_, err := authz.CreateRole(authz.RoleInput{Key: "everything", Name: "Everything", Grants: grants})
+	require.NoError(t, err)
+	require.NoError(t, authz.SetUserRoles(6, []string{"everything"}))
+}
+
+func TestRoleManagementRoutesStayRootOnly(t *testing.T) {
+	initAuthzRouteTest(t)
+	fullyGrantedRole(t)
+
+	checked := 0
+	for _, key := range AccessTokenRouteRuleKeys() {
+		method, path, _ := strings.Cut(key, " ")
+		if !strings.HasPrefix(path, "/api/authz/roles") && !strings.HasPrefix(path, "/api/authz/users/") {
+			continue
+		}
+		checked++
+		assert.False(t, routeAllowed(t, method, path, 6, common.RoleAdminUser, common.RoleRootUser), key)
+		assert.True(t, routeAllowed(t, method, path, 1, common.RoleRootUser, common.RoleRootUser), key)
+	}
+	assert.Equal(t, 8, checked)
+}
+
+func TestRootRouteWithAdminDefaultScopeStaysRootOnly(t *testing.T) {
+	initAuthzRouteTest(t)
+	fullyGrantedRole(t)
+	const key = "GET /api/rbac-test/root-user-read"
+	accessTokenRouteRules[key] = accessTokenScopeRule("user:read")
+	t.Cleanup(func() { delete(accessTokenRouteRules, key) })
+
+	for _, userID := range []int{5, 6} {
+		assert.False(t, routeAllowed(t, http.MethodGet, "/api/rbac-test/root-user-read", userID, common.RoleAdminUser, common.RoleRootUser), userID)
+		assert.True(t, routeAllowed(t, http.MethodGet, "/api/rbac-test/root-user-read", userID, common.RoleAdminUser, common.RoleAdminUser), userID)
+	}
+	assert.True(t, routeAllowed(t, http.MethodGet, "/api/rbac-test/root-user-read", 1, common.RoleRootUser, common.RoleRootUser))
 }
 
 func TestBuiltInAdminBaselineMatchesStaticMinRole(t *testing.T) {

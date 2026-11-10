@@ -7,7 +7,9 @@ import (
 )
 
 // authzRouteRoleOverrides keeps routes on a plain role floor even when the
-// route table declares a permission scope for them.
+// route table declares a permission scope for them. Channel key viewing stays
+// root-only although channel:secret_view is not in the admin baseline, so a
+// per-user or role grant of it cannot unlock the route.
 var authzRouteRoleOverrides = map[string]int{
 	"GET /api/authz/catalog":    common.RoleAdminUser,
 	"POST /api/channel/:id/key": common.RoleRootUser,
@@ -35,10 +37,19 @@ func dashboardRoleAllowed(c *gin.Context, userID, role, minRole int) bool {
 	}
 	// Routes declared through DeclareAccessTokenPermissionRoute are guarded by
 	// RequirePermission, which denies after the admin audit has started.
-	if rule, ok := accessTokenRouteRules[key]; ok {
-		if permission, ok := authz.PermissionFromScope(rule.Scope()); ok {
-			return authz.Can(userID, role, permission)
-		}
+	rule, ok := accessTokenRouteRules[key]
+	if !ok {
+		return role >= minRole
 	}
-	return role >= minRole
+	permission, ok := authz.PermissionFromScope(rule.Scope())
+	if !ok {
+		return role >= minRole
+	}
+	// A root-only route whose scope every admin holds by default stays
+	// root-only; otherwise its permission would open it to all admins.
+	allowed := authz.Can(userID, role, permission)
+	if minRole >= common.RoleRootUser && authz.RoleBaselineAllows(authz.BuiltInRoleAdmin, permission) {
+		allowed = false
+	}
+	return allowed
 }

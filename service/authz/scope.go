@@ -25,3 +25,10 @@ func IsRegisteredResource(resource string) bool {
 func Initialized() bool {
 	return currentEnforcer() != nil
 }
+
+// RoleBaselineAllows reports whether the role's own policies allow the
+// permission, ignoring per-user overrides.
+func RoleBaselineAllows(roleKey string, permission Permission) bool {
+	e := currentEnforcer()
+	return e != nil && roleBaselineAllows(e, roleKey, permission)
+}
