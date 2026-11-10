@@ -281,3 +281,51 @@ func TestResolverFailsClosedOnBindingQueryError(t *testing.T) {
 	invalidateRoleBindings()
 	assert.True(t, Can(6, common.RoleAdminUser, ChannelRead))
 }
+
+// newSlaveWithoutBindingsTable seeds policies as the master would, drops the
+// bindings table and initializes the store as a slave node.
+func newSlaveWithoutBindingsTable(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+	require.NoError(t, db.Migrator().DropTable(&model.AuthzUserRole{}))
+	common.IsMasterNode = false
+	require.NoError(t, Init(db))
+	return db
+}
+
+func TestSlaveDoesNotMigrateBindingsTable(t *testing.T) {
+	db := newSlaveWithoutBindingsTable(t)
+
+	assert.False(t, db.Migrator().HasTable(&model.AuthzUserRole{}))
+	assert.True(t, Can(5, common.RoleAdminUser, ChannelRead))
+	assert.False(t, Can(5, common.RoleAdminUser, ChannelSensitiveWrite))
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return ClearUserAuthorizationInTx(tx, 5)
+	}))
+	require.NoError(t, ClearUserAuthorization(5))
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return SetUserPermissionsInTx(tx, 5, PermissionsMap{ResourceChannel: {ActionSensitiveWrite: true}})
+	}))
+
+	_, err := CreateRole(RoleInput{Key: "viewer", Name: "Viewer"})
+	assert.ErrorIs(t, err, errBindingsTableMissing)
+	assert.ErrorIs(t, SetUserRoles(5, nil), errBindingsTableMissing)
+	assert.ErrorIs(t, SetRoleMembers("viewer", nil), errBindingsTableMissing)
+	assert.False(t, db.Migrator().HasTable(&model.AuthzUserRole{}))
+}
+
+func TestBindingsTableAppearingLaterIsUsed(t *testing.T) {
+	db := newSlaveWithoutBindingsTable(t)
+	require.True(t, Can(5, common.RoleAdminUser, userRead))
+
+	require.NoError(t, db.AutoMigrate(&model.AuthzUserRole{}))
+	require.NoError(t, db.Create(&model.AuthzUserRole{UserId: 5, RoleKey: "viewer"}).Error)
+	require.NoError(t, db.Create(&model.CasbinRule{Ptype: "p", V0: RoleSubject("viewer"), V1: ResourceChannel, V2: ActionRead, V3: EffectAllow}).Error)
+	require.NoError(t, ReloadPolicy())
+	invalidateRoleBindings()
+
+	assert.Equal(t, []string{"viewer"}, resolveSubjectRoles(5, common.RoleAdminUser))
+	assert.True(t, Can(5, common.RoleAdminUser, ChannelRead))
+	assert.False(t, Can(5, common.RoleAdminUser, userRead))
+}

@@ -24,6 +24,7 @@ var (
 	ErrRoleMemberInvalid = errors.New("role members must be administrators below root")
 
 	errRoleStoreUnavailable = errors.New("authz role store is not initialized")
+	errBindingsTableMissing = errors.New("authz role bindings table has not been migrated yet")
 )
 
 const (
@@ -67,13 +68,16 @@ type roleBindingEntry struct {
 	expires time.Time
 }
 
-// customRoleDB is the store passed to Init. The binding cache is keyed by user
-// id; roleBindingGen guards against caching a lookup that raced a write.
+// customRoleDB is the store passed to Init. bindingsTablePresent turns true
+// once the binding table is known to exist and stays true; until then a user
+// has no bindings. The binding cache is keyed by user id; roleBindingGen guards
+// against caching a lookup that raced a write.
 var (
-	customRoleMu     sync.RWMutex
-	customRoleDB     *gorm.DB
-	roleBindingCache = map[int]roleBindingEntry{}
-	roleBindingGen   uint64
+	customRoleMu         sync.RWMutex
+	customRoleDB         *gorm.DB
+	bindingsTablePresent bool
+	roleBindingCache     = map[int]roleBindingEntry{}
+	roleBindingGen       uint64
 )
 
 func init() {
@@ -97,15 +101,18 @@ func init() {
 	}
 }
 
-// initCustomRoles binds the role store to db and creates the binding table,
-// which is owned by this package rather than the main migration list. Every
-// node migrates it so a node never runs against a missing table.
+// initCustomRoles binds the role store to db. The binding table is owned by
+// this package rather than the main migration list and, like the main schema,
+// is only migrated by the master node; other nodes detect it lazily.
 func initCustomRoles(db *gorm.DB) error {
-	if err := db.AutoMigrate(&model.AuthzUserRole{}); err != nil {
-		return err
+	if common.IsMasterNode {
+		if err := db.AutoMigrate(&model.AuthzUserRole{}); err != nil {
+			return err
+		}
 	}
 	customRoleMu.Lock()
 	customRoleDB = db
+	bindingsTablePresent = common.IsMasterNode
 	customRoleMu.Unlock()
 	invalidateRoleBindings()
 	return nil
@@ -115,6 +122,37 @@ func currentRoleDB() *gorm.DB {
 	customRoleMu.RLock()
 	defer customRoleMu.RUnlock()
 	return customRoleDB
+}
+
+// roleStore returns the store for role management, which needs the binding
+// table to exist.
+func roleStore() (*gorm.DB, error) {
+	db := currentRoleDB()
+	if db == nil {
+		return nil, errRoleStoreUnavailable
+	}
+	if !bindingsTableReady(db) {
+		return nil, errBindingsTableMissing
+	}
+	return db, nil
+}
+
+// bindingsTableReady reports whether the binding table exists, checking db
+// until it has been seen once.
+func bindingsTableReady(db *gorm.DB) bool {
+	customRoleMu.RLock()
+	present := bindingsTablePresent
+	customRoleMu.RUnlock()
+	if present {
+		return true
+	}
+	if !db.Migrator().HasTable(&model.AuthzUserRole{}) {
+		return false
+	}
+	customRoleMu.Lock()
+	bindingsTablePresent = true
+	customRoleMu.Unlock()
+	return true
 }
 
 func invalidateRoleBindings() {
@@ -146,10 +184,14 @@ func userRoleBindings(userID int) ([]string, error) {
 		return nil, nil
 	}
 
-	keys, err := loadUserRoleKeys(db, userID)
-	if err != nil {
-		common.SysError(common.LogText("failed to load authz role bindings for user %d: %s", userID, err.Error()))
-		return nil, err
+	var keys []string
+	if bindingsTableReady(db) {
+		var err error
+		keys, err = loadUserRoleKeys(db, userID)
+		if err != nil {
+			common.SysError(common.LogText("failed to load authz role bindings for user %d: %s", userID, err.Error()))
+			return nil, err
+		}
 	}
 	ttl := time.Duration(common.SyncFrequency) * time.Second
 	if ttl <= 0 {
@@ -166,6 +208,9 @@ func userRoleBindings(userID int) ([]string, error) {
 // adminRolesInTx resolves an administrator's roles from tx, so a transaction
 // sees its own uncommitted bindings and never waits for a second connection.
 func adminRolesInTx(tx *gorm.DB, userID int) ([]string, error) {
+	if !bindingsTableReady(tx) {
+		return []string{BuiltInRoleAdmin}, nil
+	}
 	keys, err := loadUserRoleKeys(tx, userID)
 	if err != nil {
 		return nil, err
@@ -184,9 +229,9 @@ func loadUserRoleKeys(db *gorm.DB, userID int) ([]string, error) {
 
 // ListRoles returns root and admin followed by custom roles in creation order.
 func ListRoles() ([]RoleView, error) {
-	db := currentRoleDB()
-	if db == nil {
-		return nil, errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return nil, err
 	}
 	var roles []model.AuthzRole
 	if err := db.Where(map[string]any{"built_in": false}).Order("id asc").Find(&roles).Error; err != nil {
@@ -221,9 +266,9 @@ func ListRoles() ([]RoleView, error) {
 
 // CreateRole stores a custom role. An empty key is derived from the name.
 func CreateRole(input RoleInput) (RoleView, error) {
-	db := currentRoleDB()
-	if db == nil {
-		return RoleView{}, errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return RoleView{}, err
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -241,7 +286,7 @@ func CreateRole(input RoleInput) (RoleView, error) {
 		Enabled:     true,
 		Sort:        customRoleSort,
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if role.Key != "" {
 			exists, err := roleKeyExists(tx, role.Key)
 			if err != nil {
@@ -288,13 +333,13 @@ func CreateRole(input RoleInput) (RoleView, error) {
 // UpdateRole replaces a custom role's name, description and grants. The key in
 // input is ignored.
 func UpdateRole(key string, input RoleInput) (RoleView, error) {
-	db := currentRoleDB()
-	if db == nil {
-		return RoleView{}, errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return RoleView{}, err
 	}
 	name := strings.TrimSpace(input.Name)
 	var role model.AuthzRole
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		var err error
 		role, err = findCustomRole(tx, key)
 		if err != nil {
@@ -327,11 +372,11 @@ func UpdateRole(key string, input RoleInput) (RoleView, error) {
 // DeleteRole removes a custom role with its policies and bindings. A role that
 // still has members is only removed when force is set.
 func DeleteRole(key string, force bool) error {
-	db := currentRoleDB()
-	if db == nil {
-		return errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return err
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if _, err := findCustomRole(tx, key); err != nil {
 			return err
 		}
@@ -361,15 +406,15 @@ func DeleteRole(key string, force bool) error {
 
 // RoleMembers lists the users bound to a custom role, excluding deleted users.
 func RoleMembers(key string) ([]RoleMember, error) {
-	db := currentRoleDB()
-	if db == nil {
-		return nil, errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return nil, err
 	}
 	if _, err := findCustomRole(db, key); err != nil {
 		return nil, err
 	}
 	members := make([]RoleMember, 0)
-	err := db.Model(&model.User{}).
+	err = db.Model(&model.User{}).
 		Select("id", "username", "display_name").
 		Where("id IN (?)", db.Model(&model.AuthzUserRole{}).Select("user_id").Where("role_key = ?", key)).
 		Order("id asc").
@@ -382,12 +427,12 @@ func RoleMembers(key string) ([]RoleMember, error) {
 
 // SetRoleMembers replaces the users bound to a custom role.
 func SetRoleMembers(key string, userIDs []int) error {
-	db := currentRoleDB()
-	if db == nil {
-		return errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return err
 	}
 	ids := slices.Compact(slices.Sorted(slices.Values(userIDs)))
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if _, err := findCustomRole(tx, key); err != nil {
 			return err
 		}
@@ -415,12 +460,12 @@ func SetRoleMembers(key string, userIDs []int) error {
 
 // SetUserRoles replaces the custom roles bound to a user.
 func SetUserRoles(userID int, roleKeys []string) error {
-	db := currentRoleDB()
-	if db == nil {
-		return errRoleStoreUnavailable
+	db, err := roleStore()
+	if err != nil {
+		return err
 	}
 	keys := slices.Compact(slices.Sorted(slices.Values(roleKeys)))
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if err := validateRoleMembers(tx, []int{userID}); err != nil {
 			return err
 		}
@@ -453,7 +498,11 @@ func SetUserRoles(userID int, roleKeys []string) error {
 }
 
 // ClearUserRolesInTx removes every custom role binding of the user.
+// Without the binding table there is nothing to clear.
 func ClearUserRolesInTx(tx *gorm.DB, userID int) error {
+	if !bindingsTableReady(tx) {
+		return nil
+	}
 	if err := tx.Where("user_id = ?", userID).Delete(&model.AuthzUserRole{}).Error; err != nil {
 		return err
 	}
