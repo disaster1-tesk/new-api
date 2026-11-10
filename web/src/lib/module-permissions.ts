@@ -120,3 +120,26 @@ export function hasAdminPermissionMatrix(
 ): boolean {
   return user?.permissions?.admin_permissions !== undefined
 }
+
+// The backend tells the client which sidebar modules the user may configure
+// (permissions.sidebar_modules). A stored `false` for a module the user cannot
+// configure is a role-generated default, not their choice, so it must not
+// narrow the sidebar.
+export function dropNonConfigurableSidebarModules<
+  T extends Record<string, Record<string, boolean>>,
+>(config: T | null, allowed: Record<string, unknown> | undefined): T | null {
+  if (!config || !allowed) return config
+  const result: Record<string, Record<string, boolean>> = {}
+  for (const [section, modules] of Object.entries(config)) {
+    const allowedSection = allowed[section]
+    if (allowedSection === false) continue
+    const allowedModules =
+      allowedSection && typeof allowedSection === 'object'
+        ? (allowedSection as Record<string, unknown>)
+        : {}
+    result[section] = Object.fromEntries(
+      Object.entries(modules).filter(([key]) => allowedModules[key] !== false)
+    )
+  }
+  return result as T
+}
