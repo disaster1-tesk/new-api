@@ -82,6 +82,28 @@ func TestUserOverrideIsRelativeToBoundRoles(t *testing.T) {
 	assert.False(t, Can(5, common.RoleAdminUser, ChannelRead))
 }
 
+func TestUserOverrideInTxIsRelativeToBoundRoles(t *testing.T) {
+	db := newCustomRoleTestDB(t)
+	createChannelViewer(t)
+	require.NoError(t, SetUserRoles(5, []string{"channel-viewer"}))
+
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return SetUserPermissionsInTx(tx, 5, PermissionsMap{
+			ResourceUser:    {ActionRead: true},
+			ResourceChannel: {ActionRead: false, ActionWrite: false},
+		})
+	}))
+	require.NoError(t, ReloadPolicy())
+
+	assert.True(t, Can(5, common.RoleAdminUser, userRead), "a grant beyond the role is stored as an allow override")
+	assert.False(t, Can(5, common.RoleAdminUser, ChannelRead), "a grant removed from the role is stored as a deny override")
+	assert.Equal(t, PermissionsMap{
+		ResourceUser:    {ActionRead: true},
+		ResourceChannel: {ActionRead: false},
+	}, ExplicitUserOverrides(5), "a value equal to the role baseline stores no override")
+	assert.True(t, Can(6, common.RoleAdminUser, ChannelWrite), "other admins keep the admin baseline")
+}
+
 func TestRoleMembersMustBeAdmins(t *testing.T) {
 	newCustomRoleTestDB(t)
 	createChannelViewer(t)
