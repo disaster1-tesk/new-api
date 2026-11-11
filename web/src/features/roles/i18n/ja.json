@@ -44,6 +44,7 @@
   "Search administrators": "管理者を検索",
   "Search by username or display name": "ユーザー名または表示名で検索",
   "Search for administrators to add them.": "管理者を検索して追加してください。",
+  "Task plugin management": "タスクプラグイン管理",
   "The role key cannot be changed.": "ロール識別子は変更できません。",
   "The root role always has every permission.": "スーパー管理者ロールは常にすべての権限を持ちます。",
   "This role has {{total}} members. Deleting it also removes their role assignments.": "このロールには {{total}} 人のメンバーがいます。削除すると、メンバーのロール割り当ても削除されます。",

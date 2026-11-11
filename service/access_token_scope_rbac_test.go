@@ -27,6 +27,24 @@ func initAuthzForTest(t *testing.T) {
 	require.NoError(t, authz.Init(db))
 }
 
+// catalogLabelRenames lists permission-catalog labels that intentionally differ
+// from the access token label of the same resource. "Task plugins" would read
+// the same as the upstream task_plugin resource ("Task Plugin") in the
+// permission matrix, so task plugin management gets its own name there.
+var catalogLabelRenames = map[string]string{
+	"plugin": "Task plugin management",
+}
+
+func TestPermissionMatrixPluginRowsHaveDistinctLabels(t *testing.T) {
+	initAuthzForTest(t)
+	labels := map[string]string{}
+	for _, definition := range authz.Catalog() {
+		labels[definition.Resource] = definition.LabelKey
+	}
+	assert.Equal(t, "Task plugin management", labels[authz.ResourcePlugin])
+	assert.Equal(t, "Task Plugin", labels[authz.ResourceTaskPlugin])
+}
+
 func TestAdminResourcesMirrorStaticAccessTokenResources(t *testing.T) {
 	initAuthzForTest(t)
 	catalog := authz.Catalog()
@@ -37,7 +55,11 @@ func TestAdminResourcesMirrorStaticAccessTokenResources(t *testing.T) {
 		idx := slices.IndexFunc(catalog, func(d authz.ResourceDefinition) bool { return d.Resource == static.Resource })
 		require.GreaterOrEqual(t, idx, 0, static.Resource)
 		def := catalog[idx]
-		assert.Equal(t, static.LabelKey, def.LabelKey, static.Resource)
+		wantLabel := static.LabelKey
+		if renamed, ok := catalogLabelRenames[static.Resource]; ok {
+			wantLabel = renamed
+		}
+		assert.Equal(t, wantLabel, def.LabelKey, static.Resource)
 		require.Len(t, def.Actions, len(static.Actions), static.Resource)
 		for i, action := range static.Actions {
 			assert.Equal(t, action.Action, def.Actions[i].Action, static.Resource)

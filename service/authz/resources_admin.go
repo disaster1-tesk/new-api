@@ -52,7 +52,9 @@ func init() {
 	RegisterResource(adminResource(ResourceOption, "System settings", false,
 		"View system settings, custom OAuth providers, and price sync sources.",
 		"Change system settings and custom OAuth providers, and sync prices."))
-	RegisterResource(adminResource(ResourcePlugin, "Task plugins", false,
+	// Not "Task plugins" as in the access token catalog: that reads the same as
+	// the task_plugin resource ("Task Plugin") in the permission matrix.
+	RegisterResource(adminResource(ResourcePlugin, "Task plugin management", false,
 		"View installed task plugins and their settings.",
 		"Install, configure, test, and remove task plugins."))
 	RegisterResource(adminResource(ResourceOps, "Operations", false,

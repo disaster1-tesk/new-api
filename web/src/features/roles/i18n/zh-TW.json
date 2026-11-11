@@ -44,6 +44,7 @@
   "Search administrators": "搜尋管理員",
   "Search by username or display name": "依使用者名稱或顯示名稱搜尋",
   "Search for administrators to add them.": "搜尋管理員以新增為成員。",
+  "Task plugin management": "任務外掛管理",
   "The role key cannot be changed.": "角色識別碼無法變更。",
   "The root role always has every permission.": "超級管理員角色永遠擁有全部權限。",
   "This role has {{total}} members. Deleting it also removes their role assignments.": "此角色有 {{total}} 位成員。刪除後也會移除這些成員的角色指派。",

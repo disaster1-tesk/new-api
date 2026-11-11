@@ -44,6 +44,7 @@
   "Search administrators": "Search administrators",
   "Search by username or display name": "Search by username or display name",
   "Search for administrators to add them.": "Search for administrators to add them.",
+  "Task plugin management": "Task plugin management",
   "The role key cannot be changed.": "The role key cannot be changed.",
   "The root role always has every permission.": "The root role always has every permission.",
   "This role has {{total}} members. Deleting it also removes their role assignments.": "This role has {{total}} members. Deleting it also removes their role assignments.",

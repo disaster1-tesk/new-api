@@ -55,6 +55,7 @@ const requiredKeys = [
   'Roles and permissions',
   'View custom roles, their permissions, and members.',
   'Roles & Permissions',
+  'Task plugin management',
 ]
 
 function placeholders(text: string): string[] {

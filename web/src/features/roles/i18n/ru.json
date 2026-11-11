@@ -44,6 +44,7 @@
   "Search administrators": "Поиск администраторов",
   "Search by username or display name": "Поиск по имени пользователя или отображаемому имени",
   "Search for administrators to add them.": "Найдите администраторов, чтобы добавить их.",
+  "Task plugin management": "Управление плагинами задач",
   "The role key cannot be changed.": "Идентификатор роли нельзя изменить.",
   "The root role always has every permission.": "Роль суперадминистратора всегда имеет все права.",
   "This role has {{total}} members. Deleting it also removes their role assignments.": "Участников этой роли: {{total}}. При удалении их назначения роли также будут удалены.",

@@ -44,6 +44,7 @@
   "Search administrators": "Tìm quản trị viên",
   "Search by username or display name": "Tìm theo tên người dùng hoặc tên hiển thị",
   "Search for administrators to add them.": "Tìm quản trị viên để thêm vào.",
+  "Task plugin management": "Quản lý plugin tác vụ",
   "The role key cannot be changed.": "Không thể thay đổi mã vai trò.",
   "The root role always has every permission.": "Vai trò siêu quản trị luôn có mọi quyền.",
   "This role has {{total}} members. Deleting it also removes their role assignments.": "Vai trò này có {{total}} thành viên. Xóa vai trò cũng sẽ gỡ vai trò khỏi các thành viên này.",
