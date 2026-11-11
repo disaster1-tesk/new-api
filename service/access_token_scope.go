@@ -112,6 +112,13 @@ var accessTokenStaticResources = []AccessTokenResource{
 		accessTokenView("View performance, system tasks, and system information."),
 		accessTokenEdit("Run and manage maintenance tasks and performance settings."),
 	}},
+	{Resource: "authz", LabelKey: "Roles and permissions", group: AccessTokenGroupSystem, minRole: common.RoleRootUser, Actions: []authz.ActionDefinition{
+		accessTokenView("View custom roles, their permissions, and members."),
+	}},
+}
+
+func hasStaticAccessTokenResource(name string) bool {
+	return slices.ContainsFunc(accessTokenStaticResources, func(r AccessTokenResource) bool { return r.Resource == name })
 }
 
 // AccessTokenScopeOf is the token scope key for a Casbin permission.
@@ -125,14 +132,25 @@ func AccessTokenScopeOf(permission authz.Permission) string {
 func AccessTokenCatalog(userID, role int) []AccessTokenCatalogGroup {
 	resources := map[string][]AccessTokenResource{}
 	for _, resource := range accessTokenStaticResources {
-		if role < resource.minRole {
+		if authz.IsRegisteredResource(resource.Resource) {
+			resource.Actions = slices.DeleteFunc(slices.Clone(resource.Actions), func(action authz.ActionDefinition) bool {
+				return !authz.Can(userID, role, authz.Permission{Resource: resource.Resource, Action: action.Action})
+			})
+			if len(resource.Actions) == 0 {
+				continue
+			}
+		} else if role < resource.minRole {
 			continue
+		} else {
+			resource.Actions = slices.Clone(resource.Actions)
 		}
-		resource.Actions = slices.Clone(resource.Actions)
 		resources[resource.group] = append(resources[resource.group], resource)
 	}
 	if role >= common.RoleAdminUser {
 		for _, definition := range authz.Catalog() {
+			if hasStaticAccessTokenResource(definition.Resource) {
+				continue
+			}
 			resource := AccessTokenResource{Resource: definition.Resource, LabelKey: definition.LabelKey}
 			for _, action := range definition.Actions {
 				if authz.Can(userID, role, authz.Permission{Resource: definition.Resource, Action: action.Action}) {
@@ -164,6 +182,9 @@ func AccessTokenScopeDictionary() []AccessTokenResource {
 		resources = append(resources, resource)
 	}
 	for _, definition := range definitions {
+		if hasStaticAccessTokenResource(definition.Resource) {
+			continue
+		}
 		resources = append(resources, AccessTokenResource{Resource: definition.Resource, LabelKey: definition.LabelKey, Actions: definition.Actions})
 	}
 	return resources
@@ -239,6 +260,7 @@ var accessTokenVerificationScopes = map[string]string{
 	VerificationScopeAccessTokenUpdate:     "",
 	VerificationScopeAccessTokenRevoke:     "",
 	VerificationScopeLogin:                 "",
+	VerificationScopeAuthzRoleWrite:        "",
 }
 
 // AccessTokenVerificationScope returns the token scope a PAT needs for a

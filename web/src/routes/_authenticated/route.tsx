@@ -20,6 +20,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { AuthenticatedLayout } from '@/components/layout'
 import { resolveAuthentication } from '@/lib/auth-session'
+import { canAccessPath } from '@/lib/module-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated')({
@@ -37,6 +38,10 @@ export const Route = createFileRoute('/_authenticated')({
         to: '/sign-in',
         search: { redirect: location.href },
       })
+    }
+
+    if (!canAccessPath(auth.user, location.pathname)) {
+      throw redirect({ to: '/403' })
     }
   },
   component: AuthenticatedLayout,

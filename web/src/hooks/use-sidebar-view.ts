@@ -27,6 +27,11 @@ import type {
   SidebarBadges,
 } from '@/components/layout/types'
 import { useModelPricingIssueBadge } from '@/features/system-settings/models/pricing-issues'
+import {
+  canAccessPath,
+  hasAdminPermissionMatrix,
+  requiredPermissionForPath,
+} from '@/lib/module-permissions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -52,7 +57,8 @@ const ROOT_VIEW_KEY = '__root'
 export function useSidebarView(): ResolvedSidebarView {
   const { t } = useTranslation()
   const pathname = useLocation({ select: (l) => l.pathname })
-  const userRole = useAuthStore((s) => s.auth.user?.role)
+  const authUser = useAuthStore((s) => s.auth.user)
+  const userRole = authUser?.role
   const modelPricingBadge = useModelPricingIssueBadge()
   const badges: SidebarBadges = { modelPricing: modelPricingBadge }
   const rootSidebarData = useSidebarData(badges)
@@ -65,11 +71,18 @@ export function useSidebarView(): ResolvedSidebarView {
       .filter((group) => (group.id === 'admin' ? isAdmin : true))
       .map((group) => {
         const items = group.items.filter(
-          (item) => item.requiredRole === undefined || role >= item.requiredRole
+          (item) =>
+            (item.requiredRole === undefined ||
+              role >= item.requiredRole ||
+              (hasAdminPermissionMatrix(authUser) &&
+                requiredPermissionForPath(item.url) !== null)) &&
+            canAccessPath(authUser, item.url)
         )
-        return items.length === group.items.length ? group : { ...group, items }
+        if (items.length === group.items.length) return group
+        return { ...group, items }
       })
-  }, [configFilteredRoot, userRole])
+      .filter((group) => group.items.length > 0)
+  }, [configFilteredRoot, userRole, authUser])
 
   const view = resolveSidebarView(pathname)
 

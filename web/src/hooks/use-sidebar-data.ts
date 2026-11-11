@@ -178,6 +178,12 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             // Model pricing lives in System Settings.
             badge: badges.modelPricing,
           },
+          {
+            title: t('Roles & Permissions'),
+            url: '/roles',
+            icon: ShieldCheck,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
         ],
       },
     ],

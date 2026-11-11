@@ -54,6 +54,9 @@ func Init(db *gorm.DB) error {
 	enforcer = e
 	enforcerMu.Unlock()
 
+	if err := initCustomRoles(db); err != nil {
+		return err
+	}
 	if !common.IsMasterNode {
 		return nil
 	}

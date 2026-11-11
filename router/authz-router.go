@@ -16,4 +16,5 @@ func registerAuthzRoutes(apiRouter *gin.RouterGroup) {
 	{
 		authzRoute.GET("/catalog", controller.GetPermissionCatalog)
 	}
+	registerAuthzRoleRoutes(apiRouter)
 }

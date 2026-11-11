@@ -19,13 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { TaskPlugins } from '@/features/task-plugins'
-import { ROLE } from '@/lib/roles'
+import { canAccessPath } from '@/lib/module-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/task-plugins/')({
   beforeLoad: () => {
     const { auth } = useAuthStore.getState()
-    if (auth.user?.role !== ROLE.SUPER_ADMIN) throw redirect({ to: '/403' })
+    if (!canAccessPath(auth.user, '/task-plugins')) {
+      throw redirect({ to: '/403' })
+    }
   },
   component: TaskPlugins,
 })

@@ -211,6 +211,17 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/authz-router.go
 	"GET /api/authz/catalog": accessTokenScopeRule("user:read"),
 
+	// router/authz-role-router.go (custom roles, root only). Role changes
+	// need a step-up proof, which access tokens cannot obtain.
+	"GET /api/authz/roles":              accessTokenScopeRule("authz:read"),
+	"POST /api/authz/roles":             accessTokenSessionRule,
+	"PUT /api/authz/roles/:key":         accessTokenSessionRule,
+	"DELETE /api/authz/roles/:key":      accessTokenSessionRule,
+	"GET /api/authz/roles/:key/members": accessTokenScopeRule("authz:read"),
+	"PUT /api/authz/roles/:key/members": accessTokenSessionRule,
+	"GET /api/authz/users/:id/roles":    accessTokenScopeRule("authz:read"),
+	"PUT /api/authz/users/:id/roles":    accessTokenSessionRule,
+
 	// router/api-router.go: /api/token
 	"GET /api/token/":            accessTokenScopeRule("api_key:read"),
 	"GET /api/token/search":      accessTokenScopeRule("api_key:read"),

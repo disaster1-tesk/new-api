@@ -2,6 +2,7 @@ package authz
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
@@ -23,6 +24,7 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
 
+	roles := resolveSubjectRoles(userID, common.RoleAdminUser)
 	for resource, actions := range permissions {
 		if !isKnownResource(resource) {
 			continue
@@ -30,7 +32,7 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 		if _, err := e.RemoveFilteredPolicy(0, UserSubject(userID), resource); err != nil {
 			return err
 		}
-		for _, policy := range userOverridePolicies(e, resource, actions) {
+		for _, policy := range userOverridePolicies(e, roles, resource, actions) {
 			if _, err := e.AddPolicy(UserSubject(userID), policy.Resource, policy.Action, policy.Effect); err != nil {
 				return err
 			}
@@ -45,6 +47,10 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
 
+	roles, err := adminRolesInTx(tx, userID)
+	if err != nil {
+		return err
+	}
 	for resource, actions := range permissions {
 		if !isKnownResource(resource) {
 			continue
@@ -52,7 +58,7 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource).Delete(&model.CasbinRule{}).Error; err != nil {
 			return err
 		}
-		policies := userOverridePolicies(e, resource, actions)
+		policies := userOverridePolicies(e, roles, resource, actions)
 		if len(policies) == 0 {
 			continue
 		}
@@ -91,11 +97,20 @@ func ClearUserPermissionsInTx(tx *gorm.DB, userID int) error {
 }
 
 func ClearUserAuthorization(userID int) error {
-	return ClearUserPermissions(userID)
+	if err := ClearUserPermissions(userID); err != nil {
+		return err
+	}
+	if db := currentRoleDB(); db != nil {
+		return ClearUserRolesInTx(db, userID)
+	}
+	return nil
 }
 
 func ClearUserAuthorizationInTx(tx *gorm.DB, userID int) error {
-	return ClearUserPermissionsInTx(tx, userID)
+	if err := ClearUserPermissionsInTx(tx, userID); err != nil {
+		return err
+	}
+	return ClearUserRolesInTx(tx, userID)
 }
 
 // ExplicitUserPermissions returns the effective permission matrix for the
@@ -133,9 +148,9 @@ func ExplicitUserOverrides(userID int) PermissionsMap {
 	return result
 }
 
-// userOverridePolicies returns the override entries that differ from the managed
-// role baseline; entries matching the baseline are omitted.
-func userOverridePolicies(e *casbin.SyncedEnforcer, resource string, actions map[string]bool) []overridePolicy {
+// userOverridePolicies returns the override entries that differ from the union
+// of the given role baselines; entries matching it are omitted.
+func userOverridePolicies(e *casbin.SyncedEnforcer, roles []string, resource string, actions map[string]bool) []overridePolicy {
 	overrides := make([]overridePolicy, 0, len(actions))
 	for _, action := range catalogActions(resource) {
 		desired, ok := actions[action.Action]
@@ -143,7 +158,10 @@ func userOverridePolicies(e *casbin.SyncedEnforcer, resource string, actions map
 			continue
 		}
 		permission := Permission{Resource: resource, Action: action.Action}
-		if desired == roleBaselineAllows(e, managedRoleKey, permission) {
+		baseline := slices.ContainsFunc(roles, func(role string) bool {
+			return roleBaselineAllows(e, role, permission)
+		})
+		if desired == baseline {
 			continue
 		}
 		effect := EffectDeny

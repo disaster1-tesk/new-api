@@ -20,6 +20,7 @@ import { useMemo } from 'react'
 
 import type { NavGroup, NavItem } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
+import { dropNonConfigurableSidebarModules } from '@/lib/module-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
 type SidebarSectionConfig = {
@@ -297,8 +298,15 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
     if (auth?.user?.permissions?.sidebar_settings === false) {
       return null
     }
-    return parseUserSidebarConfig(auth?.user?.sidebar_modules)
-  }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
+    return dropNonConfigurableSidebarModules(
+      parseUserSidebarConfig(auth?.user?.sidebar_modules),
+      auth?.user?.permissions?.sidebar_modules
+    )
+  }, [
+    auth?.user?.permissions?.sidebar_settings,
+    auth?.user?.permissions?.sidebar_modules,
+    auth?.user?.sidebar_modules,
+  ])
 
   const filteredNavGroups = useMemo(
     () =>
@@ -329,7 +337,10 @@ export function useIsSidebarModuleVisible(url: string): boolean {
   const userConfig =
     auth?.user?.permissions?.sidebar_settings === false
       ? null
-      : parseUserSidebarConfig(auth?.user?.sidebar_modules)
+      : dropNonConfigurableSidebarModules(
+          parseUserSidebarConfig(auth?.user?.sidebar_modules),
+          auth?.user?.permissions?.sidebar_modules
+        )
 
   return isModuleEnabled(url, adminConfig, userConfig)
 }

@@ -19,14 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { SystemInfo } from '@/features/system-info'
-import { ROLE } from '@/lib/roles'
+import { canAccessPath } from '@/lib/module-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/system-info/')({
   beforeLoad: () => {
     const { auth } = useAuthStore.getState()
 
-    if (auth.user?.role !== ROLE.SUPER_ADMIN) {
+    if (!canAccessPath(auth.user, '/system-info')) {
       throw redirect({
         to: '/403',
       })

@@ -19,6 +19,7 @@ import (
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -282,7 +283,11 @@ func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool
 		return task, true, nil
 	}
 	if c.GetInt("token_id") == 0 && c.GetInt("role") >= common.RoleAdminUser {
-		return model.GetByOnlyTaskId(taskID)
+		// Cross-user access follows the admin's roles; an uninitialized authz
+		// keeps the upstream role check.
+		if !authz.Initialized() || authz.Can(c.GetInt("id"), c.GetInt("role"), authz.LogRead) {
+			return model.GetByOnlyTaskId(taskID)
+		}
 	}
 	return model.GetByTaskId(c.GetInt("id"), taskID)
 }
