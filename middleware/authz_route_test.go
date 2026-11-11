@@ -91,6 +91,8 @@ func TestDashboardRoleAllowed(t *testing.T) {
 		{http.MethodGet, "/api/user/", 5, common.RoleAdminUser, common.RoleAdminUser, true},
 		{http.MethodGet, "/api/user/", 7, common.RoleAdminUser, common.RoleAdminUser, false},
 		{http.MethodGet, "/api/authz/catalog", 7, common.RoleAdminUser, common.RoleAdminUser, true},
+		{http.MethodGet, "/api/group/", 7, common.RoleAdminUser, common.RoleAdminUser, true},
+		{http.MethodGet, "/api/prefill_group/", 7, common.RoleAdminUser, common.RoleAdminUser, false},
 		{http.MethodGet, "/api/user/self", 8, common.RoleCommonUser, common.RoleCommonUser, true},
 		{http.MethodGet, "/api/user/", 8, common.RoleCommonUser, common.RoleAdminUser, false},
 		{http.MethodGet, "/api/not-declared", 5, common.RoleAdminUser, common.RoleAdminUser, true},

@@ -12,9 +12,12 @@ import (
 // authzRouteRoleOverrides keeps routes on a plain role floor even when the
 // route table declares a permission scope for them. Channel key viewing stays
 // root-only although channel:secret_view is not in the admin baseline, so a
-// per-user or role grant of it cannot unlock the route.
+// per-user or role grant of it cannot unlock the route. The group name list
+// feeds the group filters of several admin pages (channels, users), so any
+// admin may read it; prefill groups stay behind group:read.
 var authzRouteRoleOverrides = map[string]int{
 	"GET /api/authz/catalog":    common.RoleAdminUser,
+	"GET /api/group/":           common.RoleAdminUser,
 	"POST /api/channel/:id/key": common.RoleRootUser,
 }
 
