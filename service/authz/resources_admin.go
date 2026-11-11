@@ -16,6 +16,9 @@ const (
 	ResourceOps        = "ops"
 )
 
+// LogRead gates reading other users' logs, tasks and dashboard data.
+var LogRead = Permission{Resource: ResourceLog, Action: ActionRead}
+
 func adminResource(resource, label string, adminDefault bool, view, edit string) ResourceDefinition {
 	var roles []string
 	if adminDefault {

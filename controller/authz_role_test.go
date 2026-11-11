@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -434,4 +435,48 @@ func TestAuthzRoleAuditOmitsProof(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, string(encoded), proof, fmt.Sprintf("audit entry %s", entry.Action))
 	}
+}
+
+// Cross-user task artifact lookups are an admin-only branch on a user-level
+// route, so they must honour the admin's roles rather than the numeric role.
+func TestTaskArtifactCrossUserAccessRequiresLogRead(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
+	wasMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = wasMaster })
+	require.NoError(t, model.DB.Create(&[]model.User{
+		{Id: 5, Username: "restricted5", AffCode: "r5", Password: "password", Role: common.RoleAdminUser, Status: common.UserStatusEnabled},
+		{Id: 6, Username: "plain6", AffCode: "p6", Password: "password", Role: common.RoleAdminUser, Status: common.UserStatusEnabled},
+	}).Error)
+	require.NoError(t, authz.Init(model.DB))
+	t.Cleanup(func() {
+		// The task database closes after this test; leave authz on a live
+		// store so later tests in the package do not fail closed on it.
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		require.NoError(t, err)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		sqlDB.SetMaxOpenConns(1)
+		require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}, &model.User{}))
+		require.NoError(t, authz.Init(db))
+	})
+	_, err := authz.CreateRole(authz.RoleInput{
+		Key: "channel-only", Name: "Channel only",
+		Grants: authz.PermissionsMap{authz.ResourceChannel: {authz.ActionRead: true}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, authz.SetUserRoles(5, []string{"channel-only"}))
+
+	lookup := func(userID, role int) bool {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set("id", userID)
+		c.Set("role", role)
+		_, exists, err := getTaskForArtifactRequest(c, task.TaskID)
+		require.NoError(t, err)
+		return exists
+	}
+	assert.False(t, lookup(5, common.RoleAdminUser), "restricted admin without log:read must not see another user's task")
+	assert.True(t, lookup(6, common.RoleAdminUser), "unbound admin keeps the upstream admin baseline")
+	assert.True(t, lookup(task.UserId, common.RoleCommonUser), "owner keeps access to their own task")
 }
